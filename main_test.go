@@ -2,69 +2,166 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
+// The best test would be to have a tool to sync and apply patch on original file.
+// Because it was out of the scope these test are focusing on detecting changes and removals, but it might be a bit brittle
+// if we change hashing algo or window size. It's not perfect because though because it depends on some internal changes.
+// We have variable chunk sizes, so it depends fully on those params
+//
+// I've added function which resurrects updated file from delta. It was out of scope, so I did really simple
+// to show option which could be tested. With such function it would be much easier to test, and we wouldn't need to test number of chunks which fully depends
+// on rolling hash algorithm and window size
 func TestFileDiff(t *testing.T) {
 
 	assert := assert.New(t)
 
-	// TODO: probably would need to test table those tests
-	t.Run("should be able to detect chunk changes", func(t *testing.T) {
-		// given
-		original := []byte("Hello everyone, this will be a very short text about nothing. It's only purpose if for testing")
-		// change everyone -> Everyone, and if -> IF
-		updated := []byte("Hello Everyone, this will be a very short text about nothing. It's only purpose IF for testing")
+	testCases := map[string]struct {
+		originalFile  []byte
+		updatedFile   []byte
+		changedChunks int
+		reusedChunks  int
+	}{
+		"should be able to detect no change": {
+			originalFile: []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			// change everyone -> evbryone,
+			updatedFile:   []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			changedChunks: 0,
+			reusedChunks:  2,
+		},
+		"should be able to detect one change in file which is chunked to two chunks": {
+			originalFile: []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			// change everyone -> evbryone,
+			updatedFile:   []byte("Hello evbryone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			changedChunks: 1,
+			reusedChunks:  1,
+		},
+		"should be able to detect two change in file which is chunked to two chunks": {
+			originalFile: []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			// change everyone -> evbryone, and is -> IS
+			updatedFile:   []byte("Hello evbryone, this will be a very short text about nothing. Its only purpose IS for testing. Testing should be sufficient. Yay"),
+			changedChunks: 2,
+			reusedChunks:  0,
+		},
+		"should be able to detect chunk removal at the end of the file": {
+			originalFile:  []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			updatedFile:   []byte("Hello everyone, this will be a very short text about nothing. It"),
+			changedChunks: 1,
+			reusedChunks:  0,
+		},
+		"should be able to detect chunk removal at the beginning of the file": {
+			originalFile:  []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			updatedFile:   []byte("s only purpose is for testing. Testing should be sufficient. Yay"),
+			changedChunks: 1,
+			reusedChunks:  0,
+		},
+		"should be able to detect chunk switch changes": {
+			originalFile:  []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			updatedFile:   []byte("s only purpose is for testing. Testing should be sufficient. YayHello everyone, this will be a very short text about nothing. It"),
+			changedChunks: 2,
+			reusedChunks:  0,
+		},
+		"should be able to detect additions at the end of the file": {
+			originalFile:  []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			updatedFile:   []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay it's really exciting"),
+			changedChunks: 2,
+			reusedChunks:  1,
+		},
+		"should be able to detect additions at the beginning of the file": {
+			originalFile:  []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			updatedFile:   []byte("It's really exciting. Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
+			changedChunks: 1,
+			reusedChunks:  1,
+		},
+		// sliding window for which changes are detected is set to 64. Let's generate longer text to have many chunks
+		"should detect two changes, one addition at the end and one removal in long text": {
+			originalFile: []byte("Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient" +
+				" montes, nascetur ridiculus mus. Donec quam felis, ultricies nec, pellentesque eu, pretium quis, sem. Nulla consequat massa quis enim. Donec pede justo, fringilla vel," +
+				" aliquet nec, vulputate eget, arcu. In enim justo, rhoncus ut, imperdiet a, venenatis vitae, justo. Nullam dictum felis eu pede mollis pretium. Integer tincidunt." +
+				" Cras dapibus. Vivamus elementum semper nisi. Aenean vulputate eleifend tellus. Aenean leo ligula, porttitor eu, consequat vitae, eleifend ac, enim. Aliquam lorem" +
+				" ante, dapibus in, viverra quis, feugiat a, tellus. Phasellus viverra nulla ut metus varius laoreet. Quisque rutrum. Aenean imperdiet. Etiam ultricies nisi vel augue." +
+				" Curabitur ullamcorper ultricies nisi. Nam eget dui. Etiam rhoncus. Maecenas tempus, tellus eget condimentum rhoncus, sem quam semper libero, sit amet adipiscing sem neque" +
+				" sed ipsum. Nam quam nunc, blandit vel, luctus pulvinar, hendrerit id, lorem. Maecenas nec odio et ante tincidunt tempus. Donec vitae sapien ut libero venenatis faucibus." +
+				" Nullam quis ante. Etiam sit amet orci eget eros faucibus tincidunt. Duis leo. Sed fringilla mauris sit amet nibh. Donec sodales sagittis magna. Sed consequat, leo eget " +
+				" bibendum sodales, augue velit cursus nunc, quis gravida magna mi a libero. Fusce vulputate eleifend sapien. Vestibulum purus quam, scelerisque ut, mollis sed, nonummy id," +
+				" metus. Nullam accumsan lorem in dui. Cras ultricies mi eu turpis hendrerit fringilla. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae;" +
+				" In ac dui quis mi consectetuer lacinia. Nam pretium turpis et arcu. Duis arcu tortor, suscipit eget, imperdiet nec, imperdiet iaculis, ipsum. Sed aliquam ultrices mauris." +
+				" Integer ante arcu, accumsan a, consectetuer eget, posuere ut, mauris. Praesent adipiscing. Phasellus ullamcorper ipsum rutrum nunc. Nunc nonummy metus. Vestibulum volutpat" +
+				" pretium libero. Cras id dui. Aenean ut eros et nisl sagittis vestibulum. Nullam nulla eros, ultricies sit amet, nonummy id, imperdiet feugiat, pede. Sed lectus. Donec mollis" +
+				" hendrerit risus. Phasellus nec sem in justo pellentesque facilisis. Etiam imperdiet imperdiet orci. Nunc nec neque. Phasellus leo dolor, tempus non, auctor et, hendrerit quis, nisi." +
+				" Curabitur ligula sapien, tincidunt non, euismod vitae, posuere imperdiet, leo. Maecenas malesuada. Praesent congue erat at massa. Sed cursus turpis vitae tortor. Donec posuere" +
+				" vulputate arcu. Phasellus accumsan cursus velit. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae; Sed aliquam, nisi quis porttitor congue," +
+				" elit erat euismod orci, ac placerat dolor lectus quis orci. Phasellus consectetuer vestibulum elit. Aenean tellus metus, bibendum sed, posuere ac, mattis non, nunc. Vestibulum" +
+				" fringilla pede sit amet augue. In turpis. Pellentesque posuere. Praesent turpis. Aenean posuere, tortor sed cursus feugiat, nunc augue blandit nunc, eu sollicitudin urna dolor sagittis lacus. " +
+				" Donec elit libero, sodales nec, volutpat a, suscipit non, turpis. Nullam sagittis. Suspendisse pulvinar, augue ac venenatis condimentum, sem libero volutpat nibh, nec pellentesque velit" +
+				" pede quis nunc. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae; Fusce id purus. Ut varius tincidunt libero. Phasellus dolor. Maecenas vestibulum mollis" +
+				" diam. Pellentesque ut neque. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. In dui magna, posuere eget, vestibulum et, tempor auctor, justo. In ac felis quis tortor malesuada pretium." +
+				" Pellentesque auctor neque nec urna. Proin sapien ipsum, porta a, auctor quis, euismod ut, mi. Aenean viverra rhoncus pede. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas." +
+				" Ut non enim eleifend felis pretium feugiat. Vivamus quis mi. Phasellus a est. Phasellus magna. In hac habitasse platea dictumst. Curabitur at lacus ac velit ornare lobortis. Cura"),
+			// changes are named (to ease searching) - FIRST, SECOND, ADDITION, removed 'ultrices' from 'et ultrices posuere'
+			updatedFile: []byte("Lorem ipsum FIRST sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient" +
+				" montes, nascetur ridiculus mus. Donec quam felis, ultricies nec, pellentesque eu, pretium quis, sem. Nulla consequat massa quis enim. Donec pede justo, fringilla vel," +
+				" aliquet nec, vulputate eget, arcu. In enim justo, rhoncus ut, imperdiet a, venenatis vitae, justo. Nullam dictum felis eu pede mollis pretium. Integer tincidunt." +
+				" Cras dapibus. Vivamus elementum semper nisi. Aenean vulputate eleifend tellus. Aenean leo ligula, porttitor eu, consequat vitae, eleifend ac, enim. Aliquam lorem" +
+				" ante, dapibus in, viverra quis, feugiat a, tellus. Phasellus viverra nulla ut metus varius laoreet. Quisque rutrum. Aenean imperdiet. Etiam ultricies nisi vel augue." +
+				" Curabitur ullamcorper ultricies nisi. Nam eget dui. Etiam rhoncus. Maecenas tempus, tellus eget condimentum rhoncus, sem quam semper libero, sit amet adipiscing sem neque" +
+				" sed ipsum. Nam quam nunc, blandit vel, luctus pulvinar, hendrerit id, lorem. Maecenas nec odio et ante tincidunt tempus. Donec vitae sapien ut libero venenatis faucibus." +
+				" Nullam quis ante. Etiam sit amet orci eget eros faucibus tincidunt. Duis leo. Sed fringilla mauris sit amet nibh. Donec sodales sagittis magna. Sed consequat, leo eget " +
+				" bibendum sodales, augue velit cursus nunc, quis gravida magna mi a libero. Fusce vulputate eleifend sapien. Vestibulum purus quam, scelerisque ut, mollis sed, nonummy id," +
+				" metus. Nullam accumsan lorem in dui. Cras SECONDies mi eu turpis hendrerit fringilla. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae;" +
+				" In ac dui quis mi consectetuer lacinia. Nam pretium turpis et arcu. Duis arcu tortor, suscipit eget, imperdiet nec, imperdiet iaculis, ipsum. Sed aliquam ultrices mauris." +
+				" Integer ante arcu, accumsan a, consectetuer eget, posuere ut, mauris. Praesent adipiscing. Phasellus ullamcorper ipsum rutrum nunc. Nunc nonummy metus. Vestibulum volutpat" +
+				" pretium libero. Cras id dui. Aenean ut eros et nisl sagittis vestibulum. Nullam nulla eros, ultricies sit amet, nonummy id, imperdiet feugiat, pede. Sed lectus. Donec mollis" +
+				" hendrerit risus. Phasellus nec sem in justo pellentesque facilisis. Etiam imperdiet imperdiet orci. Nunc nec neque. Phasellus leo dolor, tempus non, auctor et, hendrerit quis, nisi." +
+				" Curabitur ligula sapien, tincidunt non, euismod vitae, posuere imperdiet, leo. Maecenas malesuada. Praesent congue erat at massa. Sed cursus turpis vitae tortor. Donec posuere" +
+				" vulputate arcu. Phasellus accumsan cursus velit. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae; Sed aliquam, nisi quis porttitor congue," +
+				" elit erat euismod orci, ac placerat dolor lectus quis orci. Phasellus consectetuer vestibulum elit. Aenean tellus metus, bibendum sed, posuere ac, mattis non, nunc. Vestibulum" +
+				" fringilla pede sit amet augue. In turpis. Pellentesque posuere. Praesent turpis. Aenean posuere, tortor sed cursus feugiat, nunc augue blandit nunc, eu sollicitudin urna dolor sagittis lacus. " +
+				" Donec elit libero, sodales nec, volutpat a, suscipit non, turpis. Nullam sagittis. Suspendisse pulvinar, augue ac venenatis condimentum, sem libero volutpat nibh, nec pellentesque velit" +
+				" pede quis nunc. Vestibulum ante ipsum primis in faucibus orci luctus et posuere cubilia Curae; Fusce id purus. Ut varius tincidunt libero. Phasellus dolor. Maecenas vestibulum mollis" +
+				" diam. Pellentesque ut neque. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. In dui magna, posuere eget, vestibulum et, tempor auctor, justo. In ac felis quis tortor malesuada pretium." +
+				" Pellentesque auctor neque nec urna. Proin sapien ipsum, porta a, auctor quis, euismod ut, mi. Aenean viverra rhoncus pede. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas." +
+				" Ut non enim eleifend felis pretium feugiat. Vivamus quis mi. Phasellus a est. Phasellus magna. In hac habitasse platea dictumst. Curabitur at lacus ac velit ornare lobortis. Cura ADDITION"),
+			// there are 4 changes - two changes, one removal and one addition. But because addition is at the end of the file
+			// it affects chunking (more character and split) and there were two chunks instead of one, so in total 5 chunks.
+			// Original file has 45 chunks so four of them were not in updated file.
+			changedChunks: 5,
+			reusedChunks:  41,
+		},
+	}
 
-		// original file
-		originalFile, err := createTempTestFile(original)
-		defer os.Remove(originalFile.Name())
-		defer originalFile.Close()
-		assert.NoError(err)
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			// given
+			// original file
+			originalFile, err := createTempTestFile(tc.originalFile)
+			defer os.Remove(originalFile.Name())
+			defer originalFile.Close()
+			assert.NoError(err)
 
-		// updated file
-		updatedFile, err := createTempTestFile(updated)
-		defer os.Remove(updatedFile.Name())
-		defer updatedFile.Close()
-		assert.NoError(err)
+			// updated file
+			updatedFile, err := createTempTestFile(tc.updatedFile)
+			defer os.Remove(updatedFile.Name())
+			defer updatedFile.Close()
+			assert.NoError(err)
 
-		// when
-		delta, err := FileDiff(originalFile, updatedFile, 8, 4)
-		assert.NoError(err)
-		assert.NotNil(delta)
+			// when
+			delta, err := FileDiff(originalFile, updatedFile)
 
-		// figure out how to test it
-		assert.True(len(delta.Changed) > 0)
-		assert.True(len(delta.Reused) > 0)
-
-	})
-
-	t.Run("should be able to detect chunk removals at the beginning of the file", func(t *testing.T) {
-
-	})
-
-	t.Run("should be able to detect chunk removals at the end of the file", func(t *testing.T) {
-
-	})
-
-	t.Run("should be able to detect chunk removals in the middle of the file", func(t *testing.T) {
-
-	})
-
-	t.Run("should be able to detect chunk additions at the end of the file", func(t *testing.T) {
-
-	})
-
-	t.Run("should be able to detect chunk additions at the beginning of the file", func(t *testing.T) {
-
-	})
-
-	t.Run("should be able to detect chunk additions in the middle of the file", func(t *testing.T) {
-
-	})
+			//then
+			assert.NoError(err)
+			assert.NotNil(delta)
+			assert.Equal(tc.changedChunks, len(delta.Changed))
+			assert.Equal(tc.reusedChunks, len(delta.Reused))
+			/*frankenstein := frankensteinFunc(delta, tc.originalFile, tc.updatedFile)
+			assert.Equal(tc.updatedFile, frankenstein)*/
+		})
+	}
 }
 
 func createTempTestFile(fileContent []byte) (file *os.File, err error) {
@@ -103,4 +200,45 @@ func createTempTestFile(fileContent []byte) (file *os.File, err error) {
 		}
 	}()
 	return file, nil
+}
+
+// it recreates updated file from pieces (delta)
+// this is super simple function, not optimized nor well-designed
+func frankensteinFunc(delta *Delta, originalFile, updatedFile []byte) []byte {
+
+	// total length of file
+	totalLength := math.Max(float64(len(originalFile)), float64(len(updatedFile)))
+
+	recreatedFile := make([]byte, int(totalLength))
+
+	for _, chunk := range delta.Reused {
+		copy(recreatedFile[chunk.Offset:chunk.Offset+chunk.Length], chunk.Data)
+	}
+
+	for _, chunk := range delta.Changed {
+		copy(recreatedFile[chunk.Offset:chunk.Offset+chunk.Length], chunk.Data)
+	}
+
+	// remove nils from file - nils are effect of removal
+	nilStartPosition := 0
+	nilEndPosition := 0
+	nils := false
+	trimmedRecreatedFile := make([]byte, len(recreatedFile))
+	copy(trimmedRecreatedFile, recreatedFile)
+
+	for i, b := range recreatedFile {
+
+		if !nils && b == 0x00 {
+			nils = true
+			nilStartPosition = i
+		}
+
+		if nils && b != 0x00 {
+			nils = false
+			nilEndPosition = i - 1
+			trimmedRecreatedFile = append(trimmedRecreatedFile[0:nilStartPosition], trimmedRecreatedFile[nilEndPosition+1:]...)
+		}
+	}
+
+	return trimmedRecreatedFile
 }
