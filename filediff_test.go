@@ -1,12 +1,15 @@
 package filediff
 
 import (
+	"crypto/rand"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The best test would be to have a tool to sync and apply patch on original file.
@@ -138,20 +141,21 @@ func TestFileDiff(t *testing.T) {
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			// given
+			chunkSize := uint64(64)
 			// original file
-			originalFile, err := createTempTestFile(tc.originalFile)
+			originalFile, err := createTempTestFile(tc.originalFile, "original")
 			defer os.Remove(originalFile.Name())
 			defer originalFile.Close()
 			assert.NoError(err)
 
 			// updated file
-			updatedFile, err := createTempTestFile(tc.updatedFile)
+			updatedFile, err := createTempTestFile(tc.updatedFile, "updated")
 			defer os.Remove(updatedFile.Name())
 			defer updatedFile.Close()
 			assert.NoError(err)
 
 			// when
-			delta, err := FileDiff(originalFile, updatedFile)
+			delta, err := FileDiff(originalFile, updatedFile, chunkSize)
 
 			//then
 			assert.NoError(err)
@@ -201,9 +205,9 @@ func TestFileDiff(t *testing.T) {
 	})*/
 }
 
-func createTempTestFile(fileContent []byte) (file *os.File, err error) {
+func createTempTestFile(fileContent []byte, name string) (file *os.File, err error) {
 	// Write the original and updated bytes to temporary files
-	file, err = os.CreateTemp("", "original")
+	file, err = os.CreateTemp("", name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temporary file: %w", err)
 	}
@@ -224,7 +228,7 @@ func createTempTestFile(fileContent []byte) (file *os.File, err error) {
 	}
 
 	// Open the file
-	file, err = os.Open(file.Name())
+	file, err = os.OpenFile(file.Name(), os.O_WRONLY, os.ModeAppend)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open a file: %w", err)
 	}
@@ -257,22 +261,39 @@ func frankensteinFunc(delta *Delta) []byte {
 }
 
 func BenchmarkFileDiff(b *testing.B) {
-	// load files
-	original, err := os.Open("go.zip")
-	if err != nil {
-		return
+	// generate completely different files
+	original, err := createTempTestFile([]byte("initial content"), "file_diff_benchmark_orig")
+	require.NoError(b, err)
+	defer original.Close()
+
+	_, err = io.CopyN(original, rand.Reader, 10*1000*1024) // generate 10MB file
+	require.NoError(b, err)
+
+	updated, err := createTempTestFile([]byte("initial content"), "file_diff_benchmark_updated")
+	require.NoError(b, err)
+	defer updated.Close()
+
+	_, err = io.CopyN(updated, rand.Reader, 10*1000*1024) // generate 10MB file
+	require.NoError(b, err)
+
+	var table = []struct {
+		chunkSize uint64
+	}{
+		{chunkSize: 64},
+		// 1KB
+		{chunkSize: 1024},
+		// 8 MB
+		{chunkSize: 8388608},
+		// 128 MB
+		{chunkSize: 134217728},
 	}
 
-	updated, err := os.Open("go_2.zip")
-	if err != nil {
-		return
-	}
-
-	bigBuff := make([]byte, 750000000)
-	os.WriteFile("bigfile.test", bigBuff, 0666)
-
-	// benchmark loading big files
-	for n := 0; n < b.N; n++ {
-		FileDiff(original, updated)
+	b.ResetTimer()
+	for _, v := range table {
+		b.Run(fmt.Sprintf("chunk_size_%d", v.chunkSize), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				FileDiff(original, updated, v.chunkSize)
+			}
+		})
 	}
 }

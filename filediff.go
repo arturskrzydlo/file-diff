@@ -3,15 +3,15 @@ package filediff
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"time"
 
 	"file-diff/hash"
 )
-
-const mask = (1 << 6) - 1
 
 // Delta represents the changes made to the original file
 type Delta struct {
@@ -35,7 +35,10 @@ type Chunk struct {
 
 type signature map[string]Chunk
 
-func FileDiff(original, updated *os.File) (*Delta, error) {
+func FileDiff(original, updated *os.File, chunkSize uint64) (*Delta, error) {
+	if !isPowerOfTwo(chunkSize) {
+		return nil, errors.New("chunkSize parameter must be a power of two")
+	}
 	// Get the file size
 	fileInfo, _ := original.Stat()
 	fileSize := fileInfo.Size()
@@ -50,7 +53,7 @@ func FileDiff(original, updated *os.File) (*Delta, error) {
 
 	startTime := time.Now()
 
-	originalFileSignature := createSignature(data)
+	originalFileSignature := createSignature(data, chunkSize)
 
 	fileInfo, _ = updated.Stat()
 	fileSize = fileInfo.Size()
@@ -61,7 +64,7 @@ func FileDiff(original, updated *os.File) (*Delta, error) {
 		return nil, err
 	}
 
-	delta := getDelta(originalFileSignature, updatedData)
+	delta := getDelta(originalFileSignature, updatedData, chunkSize)
 	endTime := time.Now()
 	fmt.Printf("Finished in %d", (endTime.Sub(startTime)).Milliseconds())
 
@@ -69,8 +72,8 @@ func FileDiff(original, updated *os.File) (*Delta, error) {
 
 }
 
-func getDelta(originalFileSignature signature, updatedFileData []byte) *Delta {
-	updatedFileSignature := createSignature(updatedFileData)
+func getDelta(originalFileSignature signature, updatedFileData []byte, chunkSize uint64) *Delta {
+	updatedFileSignature := createSignature(updatedFileData, chunkSize)
 	reusedFileChunks := make([]Chunk, 0)
 	changedFileChunks := make([]Chunk, 0)
 
@@ -89,7 +92,7 @@ func getDelta(originalFileSignature signature, updatedFileData []byte) *Delta {
 	}
 }
 
-func createSignature(data []byte) signature {
+func createSignature(data []byte, chunkSize uint64) signature {
 	signatureChunks := make(signature)
 	buzHash := hash.NewBuzHash()
 	buzHash.ResetHash(data, hash.WindowSize)
@@ -105,7 +108,7 @@ func createSignature(data []byte) signature {
 			newBytePosition = i + hash.WindowSize
 		}
 		currentHash := buzHash.RollingHash(data[i], data[newBytePosition])
-		if shouldSplit(currentHash) {
+		if shouldSplit(currentHash, chunkSize) {
 			addNewChunkToSignature(data[previousSplitPosition:i], previousSplitPosition, signatureChunks)
 			previousSplitPosition = i
 		}
@@ -132,6 +135,12 @@ func addNewChunkToSignature(chunkData []byte, offset int, fileSig signature) {
 	}
 }
 
-func shouldSplit(hash int) bool {
+func shouldSplit(hash int, chunkSize uint64) bool {
+	bitShift := math.Log2(float64(chunkSize))
+	mask := (1 << int(bitShift)) - 1
 	return (hash & mask) == 0
+}
+
+func isPowerOfTwo(x uint64) bool {
+	return x > 0 && (x&(x-1)) == 0
 }
