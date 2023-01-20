@@ -32,6 +32,7 @@ func (bh *BuzHash) RollingHash(oldByte byte, newByte byte) int {
 	return bh.currentHash
 }
 
+// precalculating hashes for given window may be used to write func ?
 func (bh *BuzHash) ResetHash(data []byte, pos int) {
 	bh.currentHash = 0
 	for i := WindowSize; i > 0; i-- {

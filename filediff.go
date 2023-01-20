@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"time"
 
 	"file-diff/hash"
 )
@@ -35,41 +34,29 @@ type Chunk struct {
 
 type signature map[string]Chunk
 
+// FileDiff is a file chunking function based on rolling hash algorithm
+// which returns Delta between two files which can be used to apply patch on original file.
+// It requires to provide two files (os.File) original and updated and chunkSize which needs to be
+// integer equal to power of two. Files needs to be created on the caller side (same as proper file closing)
 func FileDiff(original, updated *os.File, chunkSize uint64) (*Delta, error) {
 	if !isPowerOfTwo(chunkSize) {
 		return nil, errors.New("chunkSize parameter must be a power of two")
 	}
-	// Get the file size
-	fileInfo, _ := original.Stat()
-	fileSize := fileInfo.Size()
 
-	data := make([]byte, fileSize)
-
-	// Read a chunk from the original file // TODO: it returns int so it depends on os. Does it mean any constraint how big file can be read ?
-	_, err := io.ReadFull(original, data)
+	originalData, err := readFile(original)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	originalFileSignature := createSignature(originalData, chunkSize)
+
+	updatedFileData, err := readFile(updated)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	startTime := time.Now()
-
-	originalFileSignature := createSignature(data, chunkSize)
-
-	fileInfo, _ = updated.Stat()
-	fileSize = fileInfo.Size()
-	updatedData := make([]byte, fileSize)
-
-	_, err = io.ReadFull(updated, updatedData)
-	if err != nil {
-		return nil, err
-	}
-
-	delta := getDelta(originalFileSignature, updatedData, chunkSize)
-	endTime := time.Now()
-	fmt.Printf("Finished in %d", (endTime.Sub(startTime)).Milliseconds())
+	delta := getDelta(originalFileSignature, updatedFileData, chunkSize)
 
 	return delta, nil
-
 }
 
 func getDelta(originalFileSignature signature, updatedFileData []byte, chunkSize uint64) *Delta {
@@ -94,11 +81,13 @@ func getDelta(originalFileSignature signature, updatedFileData []byte, chunkSize
 
 func createSignature(data []byte, chunkSize uint64) signature {
 	signatureChunks := make(signature)
+
 	buzHash := hash.NewBuzHash()
 	buzHash.ResetHash(data, hash.WindowSize)
 
 	previousSplitPosition := 0
 	newBytePosition := 0
+
 	for i := 0; i < len(data); i++ {
 		// if this will be potential last chunk, end position
 		// is just end of a data slice
@@ -111,6 +100,7 @@ func createSignature(data []byte, chunkSize uint64) signature {
 		if shouldSplit(currentHash, chunkSize) {
 			addNewChunkToSignature(data[previousSplitPosition:i], previousSplitPosition, signatureChunks)
 			previousSplitPosition = i
+			//buzHash.ResetHash(data, i)
 		}
 
 		// if last element
@@ -143,4 +133,20 @@ func shouldSplit(hash int, chunkSize uint64) bool {
 
 func isPowerOfTwo(x uint64) bool {
 	return x > 0 && (x&(x-1)) == 0
+}
+
+func readFile(file *os.File) ([]byte, error) {
+	// Get the file size
+	fileInfo, _ := file.Stat()
+	fileSize := fileInfo.Size()
+
+	data := make([]byte, fileSize)
+
+	// Read full data // TODO: it returns int so it depends on os. Does it mean any constraint how big file can be read ?
+	_, err := io.ReadFull(file, data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data from file %s : %w", fileInfo.Name(), err)
+	}
+
+	return data, nil
 }

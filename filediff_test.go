@@ -144,14 +144,14 @@ func TestFileDiff(t *testing.T) {
 			chunkSize := uint64(64)
 			// original file
 			originalFile, err := createTempTestFile(tc.originalFile, "original")
-			defer os.Remove(originalFile.Name())
 			defer originalFile.Close()
+			defer os.Remove(originalFile.Name())
 			assert.NoError(err)
 
 			// updated file
 			updatedFile, err := createTempTestFile(tc.updatedFile, "updated")
-			defer os.Remove(updatedFile.Name())
 			defer updatedFile.Close()
+			defer os.Remove(updatedFile.Name())
 			assert.NoError(err)
 
 			// when
@@ -167,17 +167,19 @@ func TestFileDiff(t *testing.T) {
 		})
 	}
 
-	/*	t.Run("should be able to detect chunk removals at the beginning of the file", func(t *testing.T) {
+	t.Run("should be able to detect chunk removals at the beginning of the file", func(t *testing.T) {
 		// given
 		original, err := os.Open("go.zip")
 		if err != nil {
 			return
 		}
+		defer original.Close()
 
 		updated, err := os.Open("go_2.zip")
 		if err != nil {
 			return
 		}
+		defer updated.Close()
 
 		fileInfo, _ := updated.Stat()
 		fileSize := fileInfo.Size()
@@ -193,7 +195,7 @@ func TestFileDiff(t *testing.T) {
 		}
 
 		// when
-		delta, err := FileDiff(original, updated)
+		delta, err := FileDiff(original, updated, 8388608)
 		assert.NoError(err)
 		assert.NotNil(delta)
 
@@ -202,7 +204,7 @@ func TestFileDiff(t *testing.T) {
 		assert.True(len(delta.Reused) > 0)
 		bytes := frankensteinFunc(delta)
 		assert.Equal(data, bytes)
-	})*/
+	})
 }
 
 func createTempTestFile(fileContent []byte, name string) (file *os.File, err error) {
@@ -228,7 +230,7 @@ func createTempTestFile(fileContent []byte, name string) (file *os.File, err err
 	}
 
 	// Open the file
-	file, err = os.OpenFile(file.Name(), os.O_WRONLY, os.ModeAppend)
+	file, err = os.OpenFile(file.Name(), os.O_RDWR, os.ModeAppend)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open a file: %w", err)
 	}
