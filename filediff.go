@@ -1,27 +1,17 @@
-package main
+package filediff
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"time"
+
+	"file-diff/hash"
 )
 
 const mask = (1 << 6) - 1
-
-const WINDOW_SIZE = 63
-const BH_ROTATE = WINDOW_SIZE % 32
-const BH_ROTATE_COMP = 32 - BH_ROTATE
-
-var hashes [256]int
-var currentHash int
-
-func main() {
-
-}
 
 // Delta represents the changes made to the original file
 type Delta struct {
@@ -43,12 +33,7 @@ type Chunk struct {
 	Data []byte
 }
 
-// TODO: signature could be a map type
 type signature map[string]Chunk
-
-type RollingHash interface {
-	rollingHash(data []byte, chunkSize uint64) uint64
-}
 
 func FileDiff(original, updated *os.File) (*Delta, error) {
 	// Get the file size
@@ -89,8 +74,8 @@ func getDelta(originalFileSignature signature, updatedFileData []byte) *Delta {
 	reusedFileChunks := make([]Chunk, 0)
 	changedFileChunks := make([]Chunk, 0)
 
-	for hash, updatedFileChunk := range updatedFileSignature {
-		if chunk, ok := originalFileSignature[hash]; ok {
+	for sigHash, updatedFileChunk := range updatedFileSignature {
+		if chunk, ok := originalFileSignature[sigHash]; ok {
 			reusedFileChunks = append(reusedFileChunks, chunk)
 			continue
 		}
@@ -106,18 +91,21 @@ func getDelta(originalFileSignature signature, updatedFileData []byte) *Delta {
 
 func createSignature(data []byte) signature {
 	signatureChunks := make(signature)
-	resetHash(data, WINDOW_SIZE)
+	buzHash := hash.NewBuzHash()
+	buzHash.ResetHash(data, hash.WindowSize)
 
 	previousSplitPosition := 0
 	newBytePosition := 0
 	for i := 0; i < len(data); i++ {
-		if i+WINDOW_SIZE >= len(data) {
+		// if this will be potential last chunk, end position
+		// is just end of a data slice
+		if i+hash.WindowSize >= len(data) {
 			newBytePosition = len(data) - 1
 		} else {
-			newBytePosition = i + WINDOW_SIZE
+			newBytePosition = i + hash.WindowSize
 		}
-		roll(data[i], data[newBytePosition])
-		if shouldSplit() {
+		currentHash := buzHash.RollingHash(data[i], data[newBytePosition])
+		if shouldSplit(currentHash) {
 			addNewChunkToSignature(data[previousSplitPosition:i], previousSplitPosition, signatureChunks)
 			previousSplitPosition = i
 		}
@@ -143,28 +131,7 @@ func addNewChunkToSignature(chunkData []byte, offset int, fileSig signature) {
 		}
 	}
 }
-func init() {
-	rand.Seed(42)
-	for i := 0; i < 256; i++ {
-		hashes[i] = rand.Int()
-	}
-}
 
-func resetHash(input []byte, pos int) {
-	currentHash = 0
-	if pos > len(input) {
-		pos = len(input)
-	}
-	for i := WINDOW_SIZE; i > 0; i-- {
-		currentHash = (currentHash<<1 | currentHash>>31) ^ hashes[input[pos-i]+128]
-	}
-}
-
-func roll(oldByte byte, newByte byte) {
-	oldHash := hashes[oldByte+128]
-	currentHash = (currentHash<<1 | currentHash>>31) ^ (oldHash<<BH_ROTATE | oldHash>>BH_ROTATE_COMP) ^ hashes[newByte+128]
-}
-
-func shouldSplit() bool {
-	return (currentHash & mask) == 0
+func shouldSplit(hash int) bool {
+	return (hash & mask) == 0
 }
