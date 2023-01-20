@@ -103,7 +103,6 @@ func createSignature(data []byte, chunkSize uint64) signature {
 		if shouldSplit(currentHash, mask) {
 			addNewChunkToSignature(data[previousSplitPosition:i], previousSplitPosition, signatureChunks)
 			previousSplitPosition = i
-			//buzHash.ResetHash(data, i)
 		}
 
 		// if last element
@@ -128,8 +127,8 @@ func addNewChunkToSignature(chunkData []byte, offset int, fileSig signature) {
 	}
 }
 
-func shouldSplit(hash int, mask int) bool {
-	return (hash & mask) == 0
+func shouldSplit(rollingHash int, mask int) bool {
+	return (rollingHash & mask) == 0
 }
 
 func isPowerOfTwo(x uint64) bool {

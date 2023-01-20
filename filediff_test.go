@@ -21,7 +21,6 @@ import (
 // to show option which could be tested. With such function it would be much easier to test, and we wouldn't need to test number of chunks which fully depends
 // on  FileDiff internals (rolling hash algorithm and window size)
 func TestFileDiff(t *testing.T) {
-
 	assert := assert.New(t)
 
 	testCases := map[string]struct {
@@ -157,7 +156,7 @@ func TestFileDiff(t *testing.T) {
 			// when
 			delta, err := FileDiff(originalFile, updatedFile, chunkSize)
 
-			//then
+			// then
 			assert.NoError(err)
 			assert.NotNil(delta)
 			assert.Equal(tc.changedChunks, len(delta.Changed))
@@ -248,7 +247,6 @@ func createTempTestFile(fileContent []byte, name string) (file *os.File, err err
 // it recreates updated file from pieces (delta)
 // this is super simple function, not optimized nor well-designed (definitely not a patching function)
 func frankensteinFunc(delta *Delta) []byte {
-
 	combinedChunks := append(delta.Reused, delta.Changed...)
 	sort.Slice(combinedChunks, func(i, j int) bool {
 		return combinedChunks[i].Offset < combinedChunks[j].Offset
@@ -276,7 +274,7 @@ func BenchmarkFileDiff(b *testing.B) {
 	_, err = io.CopyN(updated, rand.Reader, 10*1000*1024) // generate 10MB file
 	require.NoError(b, err)
 
-	var table = []struct {
+	table := []struct {
 		chunkSize uint64
 	}{
 		{chunkSize: 64},

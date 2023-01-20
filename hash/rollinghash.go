@@ -10,7 +10,6 @@ const (
 
 type BuzHash struct {
 	currentHash int
-	window      [WindowSize]byte
 	hashes      [256]int
 }
 
@@ -28,7 +27,8 @@ func NewBuzHash() *BuzHash {
 
 func (bh *BuzHash) RollingHash(oldByte byte, newByte byte) int {
 	oldHash := bh.hashes[oldByte+128]
-	bh.currentHash = (bh.currentHash<<1 | bh.currentHash>>31) ^ (oldHash<<bhRotate | oldHash>>bhRotateComp) ^ bh.hashes[newByte+128]
+	bh.currentHash = (bh.currentHash<<1 | bh.currentHash>>31) ^
+		(oldHash<<bhRotate | oldHash>>bhRotateComp) ^ bh.hashes[newByte+128]
 	return bh.currentHash
 }
 
