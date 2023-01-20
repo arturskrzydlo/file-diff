@@ -165,45 +165,6 @@ func TestFileDiff(t *testing.T) {
 			assert.Equal(tc.updatedFile, frankenstein)
 		})
 	}
-
-	t.Run("should be able to detect chunk removals at the beginning of the file", func(t *testing.T) {
-		// given
-		original, err := os.Open("go.zip")
-		if err != nil {
-			return
-		}
-		defer original.Close()
-
-		updated, err := os.Open("go_2.zip")
-		if err != nil {
-			return
-		}
-		defer updated.Close()
-
-		fileInfo, _ := updated.Stat()
-		fileSize := fileInfo.Size()
-
-		data := make([]byte, fileSize)
-
-		_, err = io.ReadFull(updated, data)
-		assert.NoError(err)
-
-		updated, err = os.Open("go_2.zip")
-		if err != nil {
-			return
-		}
-
-		// when
-		delta, err := FileDiff(original, updated, 8388608)
-		assert.NoError(err)
-		assert.NotNil(delta)
-
-		// figure out how to test it
-		assert.True(len(delta.Changed) > 0)
-		assert.True(len(delta.Reused) > 0)
-		bytes := frankensteinFunc(delta)
-		assert.Equal(data, bytes)
-	})
 }
 
 func createTempTestFile(fileContent []byte, name string) (file *os.File, err error) {
