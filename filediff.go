@@ -88,6 +88,9 @@ func createSignature(data []byte, chunkSize uint64) signature {
 	previousSplitPosition := 0
 	newBytePosition := 0
 
+	bitShift := math.Log2(float64(chunkSize))
+	mask := (1 << int(bitShift)) - 1
+
 	for i := 0; i < len(data); i++ {
 		// if this will be potential last chunk, end position
 		// is just end of a data slice
@@ -97,7 +100,7 @@ func createSignature(data []byte, chunkSize uint64) signature {
 			newBytePosition = i + hash.WindowSize
 		}
 		currentHash := buzHash.RollingHash(data[i], data[newBytePosition])
-		if shouldSplit(currentHash, chunkSize) {
+		if shouldSplit(currentHash, mask) {
 			addNewChunkToSignature(data[previousSplitPosition:i], previousSplitPosition, signatureChunks)
 			previousSplitPosition = i
 			//buzHash.ResetHash(data, i)
@@ -125,9 +128,7 @@ func addNewChunkToSignature(chunkData []byte, offset int, fileSig signature) {
 	}
 }
 
-func shouldSplit(hash int, chunkSize uint64) bool {
-	bitShift := math.Log2(float64(chunkSize))
-	mask := (1 << int(bitShift)) - 1
+func shouldSplit(hash int, mask int) bool {
 	return (hash & mask) == 0
 }
 
