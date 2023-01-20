@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,9 +14,9 @@ import (
 // if we change hashing algo or window size. It's not perfect because though because it depends on some internal changes.
 // We have variable chunk sizes, so it depends fully on those params
 //
-// I've added function which resurrects updated file from delta. It was out of scope, so I did really simple
+// I've added function which resurrects updated file from delta. It was out of scope, so I did it really simple
 // to show option which could be tested. With such function it would be much easier to test, and we wouldn't need to test number of chunks which fully depends
-// on rolling hash algorithm and window size
+// on  FileDiff internals (rolling hash algorithm and window size)
 func TestFileDiff(t *testing.T) {
 
 	assert := assert.New(t)
@@ -41,7 +41,7 @@ func TestFileDiff(t *testing.T) {
 			changedChunks: 1,
 			reusedChunks:  1,
 		},
-		"should be able to detect two change in file which is chunked to two chunks": {
+		"should be able to detect two changes in file which is chunked to two chunks": {
 			originalFile: []byte("Hello everyone, this will be a very short text about nothing. Its only purpose is for testing. Testing should be sufficient. Yay"),
 			// change everyone -> evbryone, and is -> IS
 			updatedFile:   []byte("Hello evbryone, this will be a very short text about nothing. Its only purpose IS for testing. Testing should be sufficient. Yay"),
@@ -158,8 +158,8 @@ func TestFileDiff(t *testing.T) {
 			assert.NotNil(delta)
 			assert.Equal(tc.changedChunks, len(delta.Changed))
 			assert.Equal(tc.reusedChunks, len(delta.Reused))
-			/*frankenstein := frankensteinFunc(delta, tc.originalFile, tc.updatedFile)
-			assert.Equal(tc.updatedFile, frankenstein)*/
+			frankenstein := frankensteinFunc(delta)
+			assert.Equal(tc.updatedFile, frankenstein)
 		})
 	}
 }
@@ -203,42 +203,18 @@ func createTempTestFile(fileContent []byte) (file *os.File, err error) {
 }
 
 // it recreates updated file from pieces (delta)
-// this is super simple function, not optimized nor well-designed
-func frankensteinFunc(delta *Delta, originalFile, updatedFile []byte) []byte {
+// this is super simple function, not optimized nor well-designed (definitely not a patching function)
+func frankensteinFunc(delta *Delta) []byte {
 
-	// total length of file
-	totalLength := math.Max(float64(len(originalFile)), float64(len(updatedFile)))
+	combinedChunks := append(delta.Reused, delta.Changed...)
+	sort.Slice(combinedChunks, func(i, j int) bool {
+		return combinedChunks[i].Offset < combinedChunks[j].Offset
+	})
 
-	recreatedFile := make([]byte, int(totalLength))
-
-	for _, chunk := range delta.Reused {
-		copy(recreatedFile[chunk.Offset:chunk.Offset+chunk.Length], chunk.Data)
+	recreatedFile := make([]byte, 0)
+	for _, chunk := range combinedChunks {
+		recreatedFile = append(recreatedFile, chunk.Data...)
 	}
 
-	for _, chunk := range delta.Changed {
-		copy(recreatedFile[chunk.Offset:chunk.Offset+chunk.Length], chunk.Data)
-	}
-
-	// remove nils from file - nils are effect of removal
-	nilStartPosition := 0
-	nilEndPosition := 0
-	nils := false
-	trimmedRecreatedFile := make([]byte, len(recreatedFile))
-	copy(trimmedRecreatedFile, recreatedFile)
-
-	for i, b := range recreatedFile {
-
-		if !nils && b == 0x00 {
-			nils = true
-			nilStartPosition = i
-		}
-
-		if nils && b != 0x00 {
-			nils = false
-			nilEndPosition = i - 1
-			trimmedRecreatedFile = append(trimmedRecreatedFile[0:nilStartPosition], trimmedRecreatedFile[nilEndPosition+1:]...)
-		}
-	}
-
-	return trimmedRecreatedFile
+	return recreatedFile
 }
