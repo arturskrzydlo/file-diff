@@ -7,7 +7,6 @@ import (
 	"io"
 	"math/rand"
 	"os"
-	"sort"
 	"time"
 )
 
@@ -89,24 +88,6 @@ func getDelta(originalFileSignature signature, updatedFileData []byte) *Delta {
 	updatedFileSignature := createSignature(updatedFileData)
 	reusedFileChunks := make([]Chunk, 0)
 	changedFileChunks := make([]Chunk, 0)
-	sortedFileSignature := make([]Chunk, 0)
-	sortedUpdatedFileSignature := make([]Chunk, 0)
-
-	for _, updatedFileChunk := range updatedFileSignature {
-		sortedUpdatedFileSignature = append(sortedUpdatedFileSignature, updatedFileChunk)
-	}
-
-	for _, updatedFileChunk := range originalFileSignature {
-		sortedFileSignature = append(sortedFileSignature, updatedFileChunk)
-	}
-
-	sort.SliceStable(sortedFileSignature, func(i, j int) bool {
-		return sortedFileSignature[i].Offset < sortedFileSignature[j].Offset
-	})
-
-	sort.SliceStable(sortedUpdatedFileSignature, func(i, j int) bool {
-		return sortedUpdatedFileSignature[i].Offset < sortedUpdatedFileSignature[j].Offset
-	})
 
 	for hash, updatedFileChunk := range updatedFileSignature {
 		if chunk, ok := originalFileSignature[hash]; ok {
@@ -116,10 +97,6 @@ func getDelta(originalFileSignature signature, updatedFileData []byte) *Delta {
 
 		changedFileChunks = append(changedFileChunks, updatedFileChunk)
 	}
-
-	sort.SliceStable(reusedFileChunks, func(i, j int) bool {
-		return reusedFileChunks[i].Offset < reusedFileChunks[j].Offset
-	})
 
 	return &Delta{
 		Reused:  reusedFileChunks,
