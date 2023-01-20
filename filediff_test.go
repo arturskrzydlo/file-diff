@@ -266,14 +266,12 @@ func BenchmarkFileDiff(b *testing.B) {
 	// generate completely different files
 	original, err := createTempTestFile([]byte("initial content"), "file_diff_benchmark_orig")
 	require.NoError(b, err)
-	defer original.Close()
 
 	_, err = io.CopyN(original, rand.Reader, 10*1000*1024) // generate 10MB file
 	require.NoError(b, err)
 
 	updated, err := createTempTestFile([]byte("initial content"), "file_diff_benchmark_updated")
 	require.NoError(b, err)
-	defer updated.Close()
 
 	_, err = io.CopyN(updated, rand.Reader, 10*1000*1024) // generate 10MB file
 	require.NoError(b, err)
@@ -290,11 +288,17 @@ func BenchmarkFileDiff(b *testing.B) {
 		{chunkSize: 134217728},
 	}
 
-	b.ResetTimer()
 	for _, v := range table {
+		b.ResetTimer()
 		b.Run(fmt.Sprintf("chunk_size_%d", v.chunkSize), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				FileDiff(original, updated, v.chunkSize)
+				original, err = os.OpenFile(original.Name(), os.O_RDWR, os.ModeAppend)
+				require.NoError(b, err)
+
+				updated, err = os.OpenFile(updated.Name(), os.O_RDWR, os.ModeAppend)
+				require.NoError(b, err)
+				_, err = FileDiff(original, updated, v.chunkSize)
+				require.NoError(b, err)
 			}
 		})
 	}
