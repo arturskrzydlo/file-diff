@@ -1,12 +1,12 @@
-# Install all development tools and build artifacts to the project's
-# `bin` directory.
-export GOBIN=$(CURDIR)/bin
-
 # Ensure that all dependencies are installed using vendored sources (/vendor).
 export GOFLAGS=-mod=vendor
 
 # Default to the system 'go'.
 GO?=$(shell which go)
+
+.PHONY: benchmarks
+benchmarks: ## Running file diff benchmarks
+	$(GO) test -bench . -run notest
 
 .PHONY: tests
 tests: ## Run unit tests

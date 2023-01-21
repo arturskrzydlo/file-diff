@@ -165,6 +165,11 @@ func TestFileDiff(t *testing.T) {
 			assert.Equal(tc.updatedFile, frankenstein)
 		})
 	}
+
+	t.Run("should not chunk files if chunk is not power of 2", func(t *testing.T) {
+		_, err := FileDiff(nil, nil, uint64(9))
+		assert.ErrorContainsf(err, "chunkSize parameter must be a power of two", err.Error())
+	})
 }
 
 func createTempTestFile(fileContent []byte, name string) (file *os.File, err error) {
@@ -225,12 +230,14 @@ func BenchmarkFileDiff(b *testing.B) {
 	// generate completely different files
 	original, err := createTempTestFile([]byte("initial content"), "file_diff_benchmark_orig")
 	require.NoError(b, err)
+	defer os.Remove(original.Name())
 
 	_, err = io.CopyN(original, rand.Reader, 10*1000*1024) // generate 10MB file
 	require.NoError(b, err)
 
 	updated, err := createTempTestFile([]byte("initial content"), "file_diff_benchmark_updated")
 	require.NoError(b, err)
+	defer os.Remove(updated.Name())
 
 	_, err = io.CopyN(updated, rand.Reader, 10*1000*1024) // generate 10MB file
 	require.NoError(b, err)
